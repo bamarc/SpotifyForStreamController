@@ -1,5 +1,6 @@
 import datetime
 from http.client import responses
+from typing import Any
 
 import requests
 from urllib import parse
@@ -167,7 +168,22 @@ class SpotifyController:
         }
         response = requests.get(url, headers=headers)
         response.raise_for_status()
-        return response.json()
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
+
+    def get_playback_art(self) -> str | None:
+        state = self.get_playback_state()
+        if state:
+            # try to get playback item
+            playback_item = state.get("item")
+            if playback_item:
+                #get album
+                album_image_url = playback_item.get("album").get("images")[0].get("url")
+                return album_image_url
+        return None
+
 
     def get_shuffle_state(self):
         state = self.get_playback_state()
