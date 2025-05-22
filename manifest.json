@@ -1,6 +1,6 @@
 {
     "version": "0.1.0",
-    "thumbnail": "assets/spotify_icon.png",
+    "thumbnail": "assets/remote.png",
     "id": "de_outsider_Spotify",
     "name": "Spotify Control"
 }
