@@ -7,8 +7,8 @@ from src.backend.PluginManager.PluginBase import PluginBase
 # Import python modules
 import os
 from loguru import logger as log
-from GtkHelper.GenerativeUI.EntryRow import EntryRow  # For regular text input
-from GtkHelper.GenerativeUI.PasswordEntryRow import PasswordEntryRow  # For secrets
+from GtkHelper.GenerativeUI.EntryRow import EntryRow # For regular text input
+from GtkHelper.GenerativeUI.PasswordEntryRow import PasswordEntryRow # For secrets
 
 # Import gtk modules - used for the config rows
 import gi
@@ -19,22 +19,26 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw
 
-
-class Previous(ActionBase):
+class Shuffle(ActionBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.shuffle_icon = os.path.join(self.plugin_base.PATH, "assets", "shuffle.png")
+        self.no_shuffle_icon = os.path.join(self.plugin_base.PATH, "assets", "no_shuffle.png")
+
 
     @property
     def get_controller(self) -> SpotifyController:
         return self.plugin_base.get_controller
 
     def on_ready(self) -> None:
-        icon_path = os.path.join(self.plugin_base.PATH, "assets", "previous.png")
+        shuffle = self.get_controller.get_shuffle_state()
+        icon_path = self.shuffle_icon if shuffle else self.no_shuffle_icon
         self.set_media(media_path=icon_path, size=0.75)
 
     def on_key_down(self) -> None:
-        print("Key down")
-        self.get_controller.previous()
+        shuffle = self.get_controller.shuffle()
+        icon_path = self.shuffle_icon if shuffle else self.no_shuffle_icon
+        self.set_media(media_path=icon_path, size=0.75)
 
     def on_key_up(self) -> None:
-        print("Key up")
+        pass

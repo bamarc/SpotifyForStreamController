@@ -2,14 +2,17 @@
 from src.backend.PluginManager.PluginBase import PluginBase
 from src.backend.PluginManager.ActionHolder import ActionHolder
 
-from .SpotifyController import SpotifyController
+from .utils.SpotifyController import SpotifyController
 # Import actions
 from .actions.MediaActions.PlayResumeAction import PlayResume
 from .actions.MediaActions.NextSongAction import Next
 from .actions.MediaActions.PreviousSongAction import Previous
+from .actions.MediaActions.ShuffleAction import Shuffle
+from .actions.MediaActions.VolumeActions import VolumeDown, VolumeUp
+
 from loguru import logger as log
 import gi
-gi.require_version("Gtk", "4.0")
+gi.require_version("Gtk" , "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, Gdk
 
@@ -22,7 +25,7 @@ class SpotifyForStreamController(PluginBase):
         self.client_authorization_row = None
         self.client_secret_row = None
         self.client_id_row = None
-        self.controller = SpotifyController(self.get_settings(), self)
+        self.controller = SpotifyController(self)
 
         ## Register actions
         self.play_resume_holder = ActionHolder(
@@ -49,6 +52,30 @@ class SpotifyForStreamController(PluginBase):
         )
         self.add_action_holder(self.previous_holder)
 
+        self.previous_holder = ActionHolder(
+            plugin_base=self,
+            action_base=Shuffle,
+            action_id="de_outsider_Spotify::Shuffle",  # Change this to your own plugin id
+            action_name="Toggle Shuffle Mode",
+        )
+        self.add_action_holder(self.previous_holder)
+
+        self.previous_holder = ActionHolder(
+            plugin_base=self,
+            action_base=VolumeUp,
+            action_id="de_outsider_Spotify::VolumeUp",  # Change this to your own plugin id
+            action_name="Add 10 Percent to Playback Volume",
+        )
+        self.add_action_holder(self.previous_holder)
+
+        self.previous_holder = ActionHolder(
+            plugin_base=self,
+            action_base=VolumeDown,
+            action_id="de_outsider_Spotify::VolumeDown",  # Change this to your own plugin id
+            action_name="Reduce Playback Volume by 10 Percent",
+        )
+        self.add_action_holder(self.previous_holder)
+
         # Register plugin
         self.register(
             plugin_name = "SpotifyForStreamController",
@@ -58,7 +85,7 @@ class SpotifyForStreamController(PluginBase):
         )
 
     @property
-    def get_controller(self):
+    def get_controller(self) -> SpotifyController:
         return self.controller
     def get_settings_area(self):
         # Create a PreferencesPage and PreferencesGroup to hold the rows
@@ -92,7 +119,7 @@ class SpotifyForStreamController(PluginBase):
         rows.append(self.client_secret_row)
 
         self.login_button_row = Adw.ButtonRow(title="Login")
-        self.login_button_row.connect("activated", self._on_login)
+        self.login_button_row.connect("activated", self.on_login)
         rows.append(self.login_button_row)
 
         # Secret string setting for authorization_token
@@ -120,15 +147,15 @@ class SpotifyForStreamController(PluginBase):
         settings["client_authorization"] = code
         del settings["client_refresh_token"]
         print(f"{self.plugin_name}: Client Secret entry has been modified.")
-        self._on_save(settings)
+        self.on_save(settings)
 
-    def _on_login(self, sender):
+    def on_login(self, _):
         controller = self.get_controller
         controller.login()
 
-    def _on_save(self, settings):
+    def on_save(self, settings):
         self.set_settings(settings)
-        self.controller = SpotifyController(self.get_settings(), self)
+        self.controller = SpotifyController(self)
 
     def _on_client_id_entry_changed(self, entry_row):
         # Store client id
@@ -136,7 +163,7 @@ class SpotifyForStreamController(PluginBase):
         client_id = entry_row.get_text()
         settings["client_id"] = client_id
         print(f"{self.plugin_name}: Client ID entry changed to: {client_id}")
-        self._on_save(settings)
+        self.on_save(settings)
 
     def _on_client_secret_entry_changed(self, entry_row):
         #  Store client secret
@@ -144,7 +171,7 @@ class SpotifyForStreamController(PluginBase):
         client_secret = entry_row.get_text()
         settings["client_secret"] = client_secret
         print(f"{self.plugin_name}: Client Secret entry has been modified.")
-        self._on_save(settings)
+        self.on_save(settings)
 
     def _on_client_authorization_entry_changed(self, entry_row):
         #  Store client secret
@@ -152,7 +179,7 @@ class SpotifyForStreamController(PluginBase):
         client_secret = entry_row.get_text()
         settings["client_authorization"] = client_secret
         print(f"{self.plugin_name}: Client Secret entry has been modified.")
-        self._on_save(settings)
+        self.on_save(settings)
 
     def _on_client_refresh_token_entry_changed(self, entry_row):
         #  Store client secret
@@ -160,6 +187,6 @@ class SpotifyForStreamController(PluginBase):
         client_secret = entry_row.get_text()
         settings["client_refresh_token"] = client_secret
         print(f"{self.plugin_name}: Client Refresh token entry has been modified.")
-        self._on_save(settings)
+        self.on_save(settings)
 
 
