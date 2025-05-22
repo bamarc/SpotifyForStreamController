@@ -78,7 +78,7 @@ class SpotifyForStreamController(PluginBase):
 
         # Register plugin
         self.register(
-            plugin_name = "SpotifyForStreamController",
+            plugin_name = "Spotify For StreamController",
             github_repo = "https://github.com/bamarc/SpotifyForStreamController",
             plugin_version = "0.1.0",
             app_version = "1.5.0-beta-10"
