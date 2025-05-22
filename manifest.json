@@ -2,5 +2,7 @@
     "version": "0.1.0",
     "thumbnail": "assets/remote.png",
     "id": "de_outsider_Spotify",
-    "name": "Spotify Control"
+    "name": "Spotify for StreamController",
+    "author": "Marc Baldauf",
+    "github": "https://github.com/bamarc/SpotifyForStreamController"
 }

@@ -1,9 +1,9 @@
 {
-    "generic": {
-        "copyright": "",
-        "original-url": "",
-        "license": "",
-        "license-url": "",
-        "description": ""
+    "assets" : {
+        "copyright": "Google",
+        "original-url": "https://fonts.google.com",
+        "license": "https://www.apache.org/licenses/LICENSE-2.0",
+        "license-url": "https://www.apache.org/licenses/LICENSE-2.0",
+        "description": "All icons in the `assets` folder are from fonts.google.com and licensed under the Apache License"
     }
 }
