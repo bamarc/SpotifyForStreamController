@@ -8,6 +8,7 @@ from .actions.MediaActions.PlayResumeAction import PlayResume
 from .actions.MediaActions.NextSongAction import Next
 from .actions.MediaActions.PreviousSongAction import Previous
 from .actions.MediaActions.ShuffleAction import Shuffle
+from .actions.MediaActions.RepeatAction import Repeat
 from .actions.MediaActions.VolumeActions import VolumeDown, VolumeUp
 
 from loguru import logger as log
@@ -62,6 +63,14 @@ class SpotifyForStreamController(PluginBase):
 
         self.previous_holder = ActionHolder(
             plugin_base=self,
+            action_base=Repeat,
+            action_id="de_outsider_Spotify::Repeat",  # Change this to your own plugin id
+            action_name="Toggle Repeat Mode",
+        )
+        self.add_action_holder(self.previous_holder)
+
+        self.previous_holder = ActionHolder(
+            plugin_base=self,
             action_base=VolumeUp,
             action_id="de_outsider_Spotify::VolumeUp",  # Change this to your own plugin id
             action_name="Add 10 Percent to Playback Volume",
@@ -80,7 +89,7 @@ class SpotifyForStreamController(PluginBase):
         self.register(
             plugin_name = "Spotify For StreamController",
             github_repo = "https://github.com/bamarc/SpotifyForStreamController",
-            plugin_version = "0.1.0",
+            plugin_version = "0.2.0",
             app_version = "1.5.0-beta-10"
         )
 

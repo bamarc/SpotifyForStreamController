@@ -3,6 +3,7 @@ from http.client import responses
 from typing import Any
 
 import requests
+import threading
 from urllib import parse
 from loguru import logger as log
 
@@ -56,7 +57,14 @@ class AuthController:
         web_auth_window.present()
 
     def get_initial_token(self):
-        secrets = f"{self.settings["client_id"]}:{self.settings["client_secret"]}"
+        client_id = self.settings.get("client_id")
+        client_secret = self.settings.get("client_secret")
+        client_authorization = self.settings.get("client_authorization")
+        if client_id is None or client_secret is None or client_authorization is None:
+            log.warn("Necessary secrets are missing, please trigger check config and trigger login to continue")
+            return None
+
+        secrets = f"{client_id}:{client_secret}"
         b64secrets = base64.b64encode(secrets.encode('utf-8')).decode('utf-8')
         url = "https://accounts.spotify.com/api/token"
         headers = {
@@ -64,7 +72,7 @@ class AuthController:
             "Authorization": f"Basic {b64secrets}"
         }
         data = {
-            "code": f"{self.settings["client_authorization"]}",
+            "code": f"{client_authorization}",
             "redirect_uri": "https://stream-controller/callback",
             "grant_type": "authorization_code",
             "scope": "user-read-playback-state user-modify-playback-state user-read-currently-playing"
@@ -116,55 +124,88 @@ class AuthController:
             return self.access_token.get_token_str
 
 class SpotifyController:
-    def __init__(self, plugin_base):
+    def __init__(self, plugin_base, update_interval_seconds=1):
         self.token = None
         self.plugin_base = plugin_base
         self.auth_controller = AuthController(plugin_base)
+        self.update_callbacks = []
+        self.latest_playback_state = None
+
+        self._update_interval = update_interval_seconds
+        self._polling_thread = None
+        self._stop_polling_event = threading.Event()
+
+        self.start_polling_updates()
 
     def login(self):
         self.auth_controller.login()
 
-    def is_playing(self):
-        state = self.get_playback_state()
+    def is_playing(self, state=None):
+        if state is None:
+            state = self.get_playback_state()
         if state is not None:
             return state.get("is_playing")
         else:
             return None
 
     def pause(self) -> bool:
+        token = self.auth_controller.get_or_refresh_token()
+        if token is None:
+            log.info("Got no token, aborting operation")
+            return False
+
         url = "https://api.spotify.com/v1/me/player/pause"
         headers = {
-            "Authorization" : f"Bearer {self.auth_controller.get_or_refresh_token()}"
+            "Authorization" : f"Bearer {token}"
         }
         response = requests.put(url, headers=headers)
         return  self.is_playing()
 
     def play(self) -> bool:
+        token = self.auth_controller.get_or_refresh_token()
+        if token is None:
+            log.info("Got no token, aborting operation")
+            return False
+
         url = "https://api.spotify.com/v1/me/player/play"
         headers = {
-            "Authorization": f"Bearer {self.auth_controller.get_or_refresh_token()}"
+            "Authorization": f"Bearer {token}"
         }
         response = requests.put(url, headers=headers)
         return self.is_playing()
 
     def next(self):
+        token = self.auth_controller.get_or_refresh_token()
+        if token is None:
+            log.info("Got no token, aborting operation")
+            return
+
         url = "https://api.spotify.com/v1/me/player/next"
         headers = {
-            "Authorization": f"Bearer {self.auth_controller.get_or_refresh_token()}"
+            "Authorization": f"Bearer {token}"
         }
         response = requests.post(url, headers=headers)
 
     def previous(self):
+        token = self.auth_controller.get_or_refresh_token()
+        if token is None:
+            log.info("Got no token, aborting operation")
+            return
+
         url = "https://api.spotify.com/v1/me/player/previous"
         headers = {
-            "Authorization": f"Bearer {self.auth_controller.get_or_refresh_token()}"
+            "Authorization": f"Bearer {token}"
         }
         response = requests.post(url, headers=headers)
 
     def get_playback_state(self):
+        token = self.auth_controller.get_or_refresh_token()
+        if token is None:
+            log.info("Got no token, aborting operation")
+            return None
         url = "https://api.spotify.com/v1/me/player"
         headers = {
-            "Authorization": f"Bearer {self.auth_controller.get_or_refresh_token()}"
+            "Authorization": f"Bearer {token}"
         }
         response = requests.get(url, headers=headers)
         response.raise_for_status()
@@ -185,23 +226,28 @@ class SpotifyController:
         return None
 
 
-    def get_shuffle_state(self):
-        state = self.get_playback_state()
+    def get_shuffle_state(self, state=None):
+        if state is None:
+            state = self.get_playback_state()
         if state:
             return state.get("shuffle_state")
         else:
             return None
 
-    def shuffle(self) -> bool:
+    def switch_shuffle(self) -> bool | None:
         try:
             shuffle_state = self.get_shuffle_state()
+            token = self.auth_controller.get_or_refresh_token()
             if shuffle_state is None:
-                pass
-            url = "https://api.spotify.com/v1/me/player/shuffle"
+                return None
+            if token is None:
+                log.info("Got no token, aborting operation")
+                return None
             headers = {
-                "Authorization": f"Bearer {self.auth_controller.get_or_refresh_token()}",
+                "Authorization": f"Bearer {token}",
                 "Content-Type": "application/x-www-form-urlencoded"
             }
+            url = "https://api.spotify.com/v1/me/player/shuffle"
             params = {
                 "state": "false" if shuffle_state else "true"
             }
@@ -230,3 +276,117 @@ class SpotifyController:
         }
         response = requests.put(url, headers=headers, params=params)
         response.raise_for_status()
+
+    def _perform_update_and_notify(self):
+        """
+        Fetches the latest playback state and notifies all registered callbacks.
+        """
+        log.trace("Performing update and notifying callbacks...")
+        try:
+            token = self.auth_controller.get_or_refresh_token()
+            if token is None:
+                return
+
+            new_state = self.get_playback_state()
+            if new_state and self.latest_playback_state is None:
+                log.info("got new state")
+                self.latest_playback_state = new_state  # Update stored state
+                for callback in self.update_callbacks:
+                    try:
+                        callback(self.latest_playback_state)  # Pass the new state to the callback
+                    except Exception as e:
+                        log.error(f"Error executing callback {callback.__name__}: {e}")
+            elif new_state and self.latest_playback_state and new_state.get("timestamp") != self.latest_playback_state.get("timestamp"):
+                log.info("got new state")
+                self.latest_playback_state = new_state # Update stored state
+                for callback in self.update_callbacks:
+                    try:
+                        callback(self.latest_playback_state) # Pass the new state to the callback
+                    except Exception as e:
+                        log.error(f"Error executing callback {callback.__name__}: {e}")
+            else:
+                log.trace("No new state received or error fetching state.")
+
+        except Exception as e:
+            log.error(f"Error during _perform_update_and_notify: {e}")
+
+    def _polling_loop(self):
+        """
+        The main loop for the polling thread.
+        """
+        while not self._stop_polling_event.is_set():
+            self._perform_update_and_notify()
+            self._stop_polling_event.wait(self._update_interval)
+        log.info("Spotify polling loop stopped.")
+
+    def start_polling_updates(self):
+        """
+        Starts the background thread to periodically fetch updates.
+        """
+        if self._polling_thread is None or not self._polling_thread.is_alive():
+            self._stop_polling_event.clear()
+            self._polling_thread = threading.Thread(target=self._polling_loop, daemon=True)
+            # daemon=True means the thread will exit when the main program exits
+            self._polling_thread.start()
+            log.info(f"Spotify polling updates started with interval: {self._update_interval}s")
+        else:
+            log.info("Polling thread is already running.")
+
+    def stop_polling_updates(self):
+        """
+        Signals the polling thread to stop.
+        """
+        if self._polling_thread and self._polling_thread.is_alive():
+            log.info("Stopping Spotify polling updates...")
+            self._stop_polling_event.set()
+            self._polling_thread.join(timeout=self._update_interval + 1) # Wait for the thread to finish
+            if self._polling_thread.is_alive():
+                log.warning("Polling thread did not stop in time.")
+            self._polling_thread = None
+        else:
+            log.info("Polling thread is not running or already stopped.")
+
+    def register_update_callback(self, callback):
+        if callback not in self.update_callbacks:
+            self.update_callbacks.append(callback)
+            log.info(f"Callback {callback.__name__} registered.")
+        else:
+            log.info(f"Callback {callback.__name__} already registered.")
+
+    def unregister_update_callback(self, callback):
+        try:
+            self.update_callbacks.remove(callback)
+            log.info(f"Callback {callback.__name__} unregistered.")
+        except ValueError:
+            log.warning(f"Callback {callback.__name__} not found for unregistration.")
+
+    def set_repeat(self, new_state):
+        try:
+            shuffle_state = self.get_shuffle_state()
+            token = self.auth_controller.get_or_refresh_token()
+            if shuffle_state is None:
+                return
+            if token is None:
+                log.info("Got no token, aborting operation")
+                return
+            url = "https://api.spotify.com/v1/me/player/repeat"
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+            params = {
+                "state": new_state
+            }
+            response = requests.put(url, headers=headers, params=params)
+            response.raise_for_status()
+        except Exception as e:
+            log.error(e)
+
+    def get_repeat_state(self, state=None):
+        if state is None:
+            state = self.get_playback_state()
+        if state:
+            return state.get("repeat_state")
+        else:
+            return None
+

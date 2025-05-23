@@ -1,6 +1,6 @@
 # Spotify Control for StreamController
 
-This WIP plugin allows you to control Spotify using StreamController.
+This WIP plugin allows you to control Spotify using StreamController. (Spotify Premium required)
 
 It currently only provides actions for:
 
@@ -8,6 +8,7 @@ It currently only provides actions for:
   * next song
   * previous song
   * switch shuffle mode
+  * switch repeat mode
   * adjust volume in 10% steps
   * show cover-art in play/resume button
 
@@ -27,7 +28,6 @@ It currently only provides actions for:
 
 ## TODO:
 
-- automatic refresh of icons based on spotify state
 - more functions
 - cleanup Code
 

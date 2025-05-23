@@ -35,6 +35,7 @@ class PlayResume(ActionBase):
 
     def on_ready(self) -> None:
         self.update_state()
+        self.get_controller.register_update_callback(self.update_state)
 
     def on_key_down(self) -> None:
         print("Key down")
@@ -77,7 +78,7 @@ class PlayResume(ActionBase):
         Returns:
             A new PIL Image object with the icon composited onto the background.
         """
-        if not background_img or not icon_img:
+        if background_img is None or icon_img is None:
             raise ValueError("Both background and icon images must be provided.")
 
         # Ensure images are in RGBA format to handle transparency properly
@@ -156,15 +157,16 @@ class PlayResume(ActionBase):
         except Exception as e:
             log.error(f"An unexpected error occurred while setting background: {e}")
 
-
-
-    def update_state(self):
-        playing = self.get_controller.is_playing()
+    def update_state(self, state=None):
+        playing = self.get_controller.is_playing(state)
         icon_path = self.play_icon if not playing else self.pause_icon
         background = self.load_background_media()
         icon = self.load_overlay(icon_path)
-        combined = self.merge_icon_on_background_centered(background, icon)
-        self.set_media(image=combined.copy())
+        if background and icon:
+            combined = self.merge_icon_on_background_centered(background, icon)
+            self.set_media(image=combined.copy())
+        elif background is None and icon:
+            self.set_media(image=icon)
 
 
 
