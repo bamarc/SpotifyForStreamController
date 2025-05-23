@@ -34,7 +34,7 @@ class Previous(ActionBase):
 
     def on_key_down(self) -> None:
         print("Key down")
-        self.get_controller.previous()
+        self.get_controller.previous_track()
 
     def on_key_up(self) -> None:
         print("Key up")

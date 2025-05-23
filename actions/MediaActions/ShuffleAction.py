@@ -35,7 +35,7 @@ class Shuffle(ActionBase):
         self.get_controller.register_update_callback(self.on_update)
 
     def on_key_down(self) -> None:
-        shuffle = self.get_controller.switch_shuffle()
+        shuffle = self.get_controller.toggle_shuffle()
         icon_path = self.shuffle_icon if shuffle else self.no_shuffle_icon
         self.set_media(media_path=icon_path, size=0.75)
 

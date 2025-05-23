@@ -41,13 +41,18 @@ class Repeat(ActionBase):
         idx = max((self.repeat_states.index(repeat)+1)%3,0)
         next_state = self.repeat_states[idx]
         next_state_icon = self.repeat_context_icon[idx]
-        self.get_controller.set_repeat(next_state)
+        self.get_controller.set_repeat_state(next_state)
         self.set_media(media_path=next_state_icon, size=0.75)
 
     def on_update(self, state=None):
         repeat_state = self.get_controller.get_repeat_state(state)
-        icon = self.icon_paths[self.repeat_states.index(repeat_state)]
-        self.set_media(media_path=icon, size=0.75)
+        if repeat_state is None:
+            # default to no repeat
+            icon = self.icon_paths[0]
+            self.set_media(media_path=icon, size=0.75)
+        else:
+            icon = self.icon_paths[self.repeat_states.index(repeat_state)]
+            self.set_media(media_path=icon, size=0.75)
 
     def on_key_up(self) -> None:
         pass

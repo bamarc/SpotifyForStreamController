@@ -130,7 +130,7 @@ class PlayResume(ActionBase):
     def load_background_media(self) -> Image.Image | None:
         # try to get album art
         try:
-            album_image_url = self.get_controller.get_playback_art()
+            album_image_url = self.get_controller.get_playback_art_url()
             if album_image_url:
                 # Fetch the image from the URL
                 response = requests.get(album_image_url, stream=True)

@@ -2,6 +2,7 @@
 from src.backend.PluginManager.PluginBase import PluginBase
 from src.backend.PluginManager.ActionHolder import ActionHolder
 
+from .utils.SpotifyController import AuthController
 from .utils.SpotifyController import SpotifyController
 # Import actions
 from .actions.MediaActions.PlayResumeAction import PlayResume
@@ -26,7 +27,8 @@ class SpotifyForStreamController(PluginBase):
         self.client_authorization_row = None
         self.client_secret_row = None
         self.client_id_row = None
-        self.controller = SpotifyController(self)
+        self.auth_controller = AuthController(self)
+        self.controller = SpotifyController(self, self.auth_controller, 1)
 
         ## Register actions
         self.play_resume_holder = ActionHolder(
@@ -96,6 +98,11 @@ class SpotifyForStreamController(PluginBase):
     @property
     def get_controller(self) -> SpotifyController:
         return self.controller
+
+    @property
+    def get_auth_controller(self) -> AuthController:
+        return self.auth_controller
+
     def get_settings_area(self):
         # Create a PreferencesPage and PreferencesGroup to hold the rows
         group = Adw.PreferencesGroup()
@@ -159,12 +166,11 @@ class SpotifyForStreamController(PluginBase):
         self.on_save(settings)
 
     def on_login(self, _):
-        controller = self.get_controller
-        controller.login()
+        controller = self.get_auth_controller
+        controller.initiate_login_flow()
 
     def on_save(self, settings):
         self.set_settings(settings)
-        self.controller = SpotifyController(self)
 
     def _on_client_id_entry_changed(self, entry_row):
         # Store client id
