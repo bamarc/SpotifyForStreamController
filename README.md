@@ -1,3 +1,4 @@
+![](assets/Thumbnail.png)
 # Spotify Control for StreamController
 
 This WIP plugin allows you to control Spotify using StreamController. (Spotify Premium required)
