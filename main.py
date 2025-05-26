@@ -10,6 +10,7 @@ from .actions.MediaActions.NextSongAction import Next
 from .actions.MediaActions.PreviousSongAction import Previous
 from .actions.MediaActions.ShuffleAction import Shuffle
 from .actions.MediaActions.RepeatAction import Repeat
+from .actions.MediaActions.DeviceActions import SelectDevice
 from .actions.MediaActions.VolumeActions import VolumeDown, VolumeUp
 
 from loguru import logger as log
@@ -31,61 +32,69 @@ class SpotifyForStreamController(PluginBase):
         self.controller = SpotifyController(self, self.auth_controller, 1)
 
         ## Register actions
-        self.play_resume_holder = ActionHolder(
+        holder = ActionHolder(
             plugin_base = self,
             action_base = PlayResume,
             action_id = "de_outsider_Spotify::PlayPause", # Change this to your own plugin id
             action_name = "Play/Pause",
         )
-        self.add_action_holder(self.play_resume_holder)
+        self.add_action_holder(holder)
 
-        self.next_holder = ActionHolder(
+        holder = ActionHolder(
             plugin_base=self,
             action_base=Next,
             action_id="de_outsider_Spotify::Next",  # Change this to your own plugin id
             action_name="Next Song",
         )
-        self.add_action_holder(self.next_holder)
+        self.add_action_holder(holder)
 
-        self.previous_holder = ActionHolder(
+        holder = ActionHolder(
             plugin_base=self,
             action_base=Previous,
             action_id="de_outsider_Spotify::Previous",  # Change this to your own plugin id
             action_name="Previous Song",
         )
-        self.add_action_holder(self.previous_holder)
+        self.add_action_holder(holder)
 
-        self.previous_holder = ActionHolder(
+        holder = ActionHolder(
             plugin_base=self,
             action_base=Shuffle,
             action_id="de_outsider_Spotify::Shuffle",  # Change this to your own plugin id
             action_name="Toggle Shuffle Mode",
         )
-        self.add_action_holder(self.previous_holder)
+        self.add_action_holder(holder)
 
-        self.previous_holder = ActionHolder(
+        holder = ActionHolder(
             plugin_base=self,
             action_base=Repeat,
             action_id="de_outsider_Spotify::Repeat",  # Change this to your own plugin id
             action_name="Toggle Repeat Mode",
         )
-        self.add_action_holder(self.previous_holder)
+        self.add_action_holder(holder)
 
-        self.previous_holder = ActionHolder(
+        holder = ActionHolder(
             plugin_base=self,
             action_base=VolumeUp,
             action_id="de_outsider_Spotify::VolumeUp",  # Change this to your own plugin id
             action_name="Add 10 Percent to Playback Volume",
         )
-        self.add_action_holder(self.previous_holder)
+        self.add_action_holder(holder)
 
-        self.previous_holder = ActionHolder(
+        holder = ActionHolder(
             plugin_base=self,
             action_base=VolumeDown,
             action_id="de_outsider_Spotify::VolumeDown",  # Change this to your own plugin id
             action_name="Reduce Playback Volume by 10 Percent",
         )
-        self.add_action_holder(self.previous_holder)
+        self.add_action_holder(holder)
+
+        holder = ActionHolder(
+            plugin_base=self,
+            action_base=SelectDevice,
+            action_id="de_outsider_Spotify::SelectDevice",  # Change this to your own plugin id
+            action_name="Select Device from List",
+        )
+        self.add_action_holder(holder)
 
         # Register plugin
         self.register(

@@ -3,6 +3,8 @@ import base64
 import threading
 import time  # For retry backoff
 import random  # For jitter
+from dataclasses import dataclass
+from enum import Enum
 from functools import wraps
 from typing import Callable, Optional, Dict, Any, List, Tuple, TypeVar, ParamSpec
 from urllib import parse
@@ -32,6 +34,7 @@ TOKEN_ENDPOINT = f"{SPOTIFY_ACCOUNTS_URL}/api/token"
 AUTHORIZE_ENDPOINT = f"{SPOTIFY_ACCOUNTS_URL}/authorize"
 
 PLAYER_BASE_ENDPOINT = f"{SPOTIFY_API_URL}/me/player"
+DEVICES_ENDPOINT = f"{PLAYER_BASE_ENDPOINT}/devices"
 # ... (other specific API endpoints can be defined here if preferred over constructing them inline)
 
 # --- Type Variables for Decorator ---
@@ -114,6 +117,28 @@ def spotify_api_request_handler(
 
     return decorator
 
+class DeviceType(Enum):
+    COMPUTER = "computer"
+    SMARTPHONE = "smartphone"
+    SPEAKER = "speaker"
+
+    @classmethod
+    def from_string(cls, s: str):
+        try:
+            return cls(s)
+        except ValueError:
+            raise ValueError(f"'{s}' is not a valid type")
+
+@dataclass
+class Device:
+    id: str
+    is_active: bool
+    is_private_session: bool
+    is_restricted: bool
+    name: str
+    type: str
+    volume_percent: int
+    supports_volume: bool
 
 # --- Token Class ---
 class Token:
@@ -565,3 +590,68 @@ class SpotifyController:
             log.info(f"Callback {name} unregistered.")
         except ValueError:
             log.warning(f"Callback {name} not found for unregistration.")
+
+    def get_raw_playback_devices(self)-> Optional[Dict[str, Any]]:
+        """Fetches the current playback state from Spotify."""
+        try:
+            response = self._make_api_request("GET", DEVICES_ENDPOINT)
+            if response:
+                if response.status_code == 200:  # State returned
+                    return response.json()
+                # Other status codes are handled by raise_for_status in decorator
+            return None  # If _make_api_request returned None (e.g. no token)
+        except requests.RequestException as e:  # Catch errors from _make_api_request
+            log.error(f"Error fetching device list: {e}")
+        except ValueError:  # JSONDecodeError
+            log.error("Error decoding JSON from get_playback_state response.")
+        return None
+
+    def get_playback_devices(self) -> Optional[List[Device]]:
+        """Fetches and converts playback devices into a list of Device objects."""
+        raw_devices_data = self.get_raw_playback_devices()
+
+        if not raw_devices_data or "devices" not in raw_devices_data:
+            log.info("No device data found or 'devices' key missing in response.")
+            return None  # Or return [] if you prefer an empty list for no devices
+
+        devices_list = []
+        for device_dict in raw_devices_data["devices"]:
+            try:
+                # Convert the 'type' string to DeviceType enum
+                # The Spotify API often uses TitleCase for device types,
+                # so ensure your from_string or direct enum conversion handles this (e.g., .lower())
+                device_type_str = device_dict.get("type", "unknown")  # Default to "unknown" if missing
+                #device_type_enum = DeviceType.from_string(device_type_str)
+
+                # Create the Device dataclass instance
+                # Using .get() for keys that might be missing to avoid KeyErrors
+                # or ensure your API contract guarantees their presence.
+                device_obj = Device(
+                    id=device_dict["id"],  # Assuming 'id' is always present
+                    is_active=device_dict.get("is_active", False),
+                    is_private_session=device_dict.get("is_private_session", False),
+                    is_restricted=device_dict.get("is_restricted", False),
+                    name=device_dict.get("name", "Unknown Device"),
+                    type=device_type_str,
+                    volume_percent=device_dict.get("volume_percent"),  # Handles if volume_percent is null
+                    supports_volume=device_dict.get("supports_volume", False)
+                )
+                devices_list.append(device_obj)
+            except KeyError as e:
+                log.error(f"Missing key {e} in device data: {device_dict}")
+            except Exception as e:  # Catch any other unexpected error during conversion
+                log.error(f"Error converting device data to Device object: {e}. Data: {device_dict}")
+
+        return devices_list
+
+    def set_playback_device(self, device) -> bool:
+        try:
+            response = self._make_api_request("PUT", PLAYER_BASE_ENDPOINT,
+                                              json={"device_ids": [device.id]})
+            # Spotify usually returns 204 No Content for successful control actions
+            return response is not None and response.status_code == 204
+        except requests.RequestException as e:
+            log.error(f"Setting playback device failed: {e}")
+            return False
+
+
