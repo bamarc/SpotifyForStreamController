@@ -12,6 +12,7 @@ It currently only provides actions for:
   * switch repeat mode
   * adjust volume in 10% steps
   * show cover-art in play/resume button
+  * select playback devices/groups from a List
 
 ## Installation & Configuration
 
