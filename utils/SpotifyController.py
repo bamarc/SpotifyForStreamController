@@ -1,10 +1,11 @@
 import datetime
 import base64
+import inspect
 import threading
 import time  # For retry backoff
 import random  # For jitter
+import weakref
 from dataclasses import dataclass
-from enum import Enum
 from functools import wraps
 from typing import Callable, Optional, Dict, Any, List, Tuple, TypeVar, ParamSpec
 from urllib import parse
@@ -12,16 +13,9 @@ from urllib import parse
 import requests
 from loguru import logger as log
 
-# Assuming these gi imports and WebAuthWindow are correctly set up
-import gi
+from gi.repository import GLib
 
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-gi.require_version('WebKit', '6.0')  # Or WebKit2GTK for older GTK3/WebKit versions
-from gi.repository import Gtk, Adw, WebKit, Gio, GLib
-
-# These are external dependencies, ensure they are correctly defined and available
-from .WebAuthWindow import WebAuthWindow  # Example relative import
+from .WebAuthWindow import WebAuthWindow
 import globals as gl  # For gl.app
 
 # --- Constants ---
@@ -87,8 +81,9 @@ def spotify_api_request_handler(
                     # 401/403 might indicate token issues that retrying won't fix here.
                     # The calling code should handle token refresh based on these.
                     if e.response is not None and 400 <= e.response.status_code < 500 and e.response.status_code != 429:
+                        url = e.request.url if e.request is not None else e.response.url
                         log.warning(
-                            f"Client error {e.response.status_code} for {e.request.url} in '{func.__name__}'. No retry. Body: {e.response.text[:200]}")
+                            f"Client error {e.response.status_code} for {url} in '{func.__name__}'. No retry. Body: {e.response.text[:200]}")
                         raise  # Re-raise to be handled by the caller
                     log.warning(
                         f"Request '{func.__name__}' failed (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {current_backoff:.2f}s.")
@@ -116,18 +111,6 @@ def spotify_api_request_handler(
         return wrapper
 
     return decorator
-
-class DeviceType(Enum):
-    COMPUTER = "computer"
-    SMARTPHONE = "smartphone"
-    SPEAKER = "speaker"
-
-    @classmethod
-    def from_string(cls, s: str):
-        try:
-            return cls(s)
-        except ValueError:
-            raise ValueError(f"'{s}' is not a valid type")
 
 @dataclass
 class Device:
@@ -163,12 +146,14 @@ class AuthController:
     def __init__(self, plugin_base: Any):  # Replace Any with actual plugin_base type
         self.access_token_obj: Optional[Token] = None
         self.plugin_base = plugin_base
-        self.settings = plugin_base.get_settings()  # Expects a dict-like object
+        self._auth_window: Optional[WebAuthWindow] = None
+
+    def _get_settings(self) -> Dict[str, Any]:
+        return self.plugin_base.get_settings() or {}
 
     def _get_client_credentials(self) -> Tuple[Optional[str], Optional[str]]:
-        client_id = self.settings.get("client_id")
-        client_secret = self.settings.get("client_secret")
-        return client_id, client_secret
+        settings = self._get_settings()
+        return settings.get("client_id"), settings.get("client_secret")
 
     def _encode_basic_auth(self, client_id: str, client_secret: str) -> str:
         credentials = f"{client_id}:{client_secret}"
@@ -206,16 +191,11 @@ class AuthController:
         # Spotify may issue a new refresh token. It's guaranteed on auth_code grant.
         new_refresh_token = response_data.get("refresh_token")
         if new_refresh_token:
-            self.settings["client_refresh_token"] = new_refresh_token
+            settings = self._get_settings()
+            settings["client_refresh_token"] = new_refresh_token
             log.info("New refresh token received and stored in settings.")
+            self.plugin_base.on_save(settings)  # Persist changes
 
-        # If this was an authorization_code grant, clear the used code
-        if grant_type == "authorization_code":
-            if "client_authorization" in self.settings:
-                del self.settings["client_authorization"]  # Or set to None
-                log.info("Authorization code cleared from settings after successful use.")
-
-        self.plugin_base.on_save(self.settings)  # Persist changes
         log.info(f"Successfully obtained and processed new access token via {grant_type}.")
         return True
 
@@ -249,7 +229,7 @@ class AuthController:
 
     def refresh_access_token(self) -> bool:
         """Refreshes an expired access token using a refresh token."""
-        current_refresh_token = self.settings.get("client_refresh_token")
+        current_refresh_token = self._get_settings().get("client_refresh_token")
         client_id, _ = self._get_client_credentials()  # client_id is required for refresh token grant by Spotify
 
         if not current_refresh_token:
@@ -277,12 +257,20 @@ class AuthController:
                     error_payload = e.response.json()
                     if error_payload.get("error") == "invalid_grant":
                         log.warning("Refresh token is invalid. Clearing it from settings.")
-                        self.settings["client_refresh_token"] = None
-                        self.plugin_base.on_save(self.settings)
+                        settings = self._get_settings()
+                        if settings.get("client_refresh_token") == current_refresh_token:
+                            settings.pop("client_refresh_token", None)
+                            self.plugin_base.on_save(settings)
                         # Potentially trigger a new full login flow here if appropriate for the app
         except ValueError as e:  # JSONDecodeError
             log.error(f"Error processing token response (refresh grant): {e}")
         return False
+
+    def has_token_or_refresh_token(self) -> bool:
+        return bool(
+            (self.access_token_obj and self.access_token_obj.is_valid)
+            or self._get_settings().get("client_refresh_token")
+        )
 
     def get_valid_token_string(self) -> Optional[str]:
         """
@@ -307,18 +295,18 @@ class AuthController:
 
     def initiate_login_flow(self):
         """Initiates the Spotify OAuth authorization flow via WebAuthWindow."""
-        client_id = self.settings.get("client_id")
+        client_id = self._get_settings().get("client_id")
         if not client_id:
             log.error("Client ID is missing in settings. Cannot initiate login.")
-            # Optionally, notify the user through plugin_base or raise an error
             return
 
         params = {
             "response_type": "code",
             "client_id": client_id,
             "redirect_uri": REDIRECT_URI,
-            "scope": DEFAULT_SCOPE
-            # Consider adding "show_dialog": "true" if you always want user to re-approve
+            "scope": DEFAULT_SCOPE,
+            # Force Spotify consent screen so cached WebKit sessions don't auto-redirect and close immediately.
+            "show_dialog": "true",
         }
         encoded_params = parse.urlencode(params)
 
@@ -326,16 +314,30 @@ class AuthController:
             log.error("Gtk.Application instance (gl.app) not available for WebAuthWindow.")
             return
 
+        old_window = self._auth_window
+        if old_window is not None:
+            self._auth_window = None
+            old_window.close()
+
+        parent = gl.app.get_active_window()
+        if parent is old_window:
+            parent = None
+
         web_auth_window = WebAuthWindow(
             application=gl.app,
+            transient_for=parent,
             initial_url=f"{AUTHORIZE_ENDPOINT}?{encoded_params}",
-            modal=True,
-            # This callback in plugin_base is responsible for getting the auth code
-            # and then calling self.auth_controller.exchange_code_for_token(code).
+            modal=parent is not None,
             callback=self.plugin_base.handle_auth_code
         )
+        web_auth_window.connect("destroy", self._on_auth_window_destroyed)
+        self._auth_window = web_auth_window
         web_auth_window.present()
         log.info("WebAuthWindow presented for Spotify login.")
+
+    def _on_auth_window_destroyed(self, window):
+        if self._auth_window is window:
+            self._auth_window = None
 
 
 # --- SpotifyController Class ---
@@ -365,23 +367,13 @@ class SpotifyController:
         headers["Authorization"] = f"Bearer {token_str}"
 
         log.trace(f"Making Spotify API request: {method} {endpoint_url}")
-        # The decorator will handle requests.request and raise_for_status
-        try:
-            # kwargs might include 'params' for GET or 'json'/'data' for POST/PUT
-            return requests.request(method, endpoint_url, headers=headers, timeout=10, **kwargs)
-        except requests.exceptions.HTTPError as e:
-            if e.response is not None and e.response.status_code in (401, 403):
-                log.warning(
-                    f"Authentication/Authorization error ({e.response.status_code}) calling {endpoint_url}. Token might be revoked.")
-                # Invalidate local token object to force refresh on next attempt
-                self.auth_controller.access_token_obj = None
-                # The decorator has already logged and will re-raise.
-            # We catch here primarily to act on specific auth errors if needed,
-            # otherwise, let the decorator's re-raise propagate.
-            raise
-        except requests.RequestException:
-            # Already logged by decorator, re-raised.
-            raise
+        response = requests.request(method, endpoint_url, headers=headers, timeout=10, **kwargs)
+        if response.status_code in (401, 403):
+            log.warning(
+                f"Authentication/Authorization error ({response.status_code}) calling {endpoint_url}. Token might be revoked.")
+            # Invalidate before the retry decorator calls raise_for_status().
+            self.auth_controller.access_token_obj = None
+        return response
 
     def get_playback_state(self) -> Optional[Dict[str, Any]]:
         """Fetches the current playback state from Spotify."""
@@ -434,8 +426,7 @@ class SpotifyController:
     def _control_playback(self, method: str, endpoint: str, **kwargs) -> bool:
         try:
             response = self._make_api_request(method, endpoint, **kwargs)
-            # Spotify usually returns 204 No Content for successful control actions
-            return response is not None and response.status_code == 204
+            return response is not None and 200 <= response.status_code < 300
         except requests.RequestException as e:
             log.error(f"Playback control command {method} {endpoint} failed: {e}")
             return False
@@ -495,23 +486,41 @@ class SpotifyController:
                 return device.get("volume_percent")
         return None
 
+    def _live_callbacks(self) -> List[Callable[[Optional[Dict[str, Any]]], None]]:
+        live = []
+        alive_refs = []
+        for ref in list(self.update_callbacks):
+            cb = ref() if isinstance(ref, weakref.ReferenceType) else ref
+            if cb is not None:
+                live.append(cb)
+                alive_refs.append(ref)
+        self.update_callbacks = alive_refs
+        return live
+
     # --- Polling Logic ---
     def _perform_update_and_notify(self):
+        callbacks = self._live_callbacks()
+        if not callbacks or not self.auth_controller.has_token_or_refresh_token():
+            return
+
         log.trace("Polling for Spotify playback state update...")
         new_state = self.get_playback_state()  # This handles its own token needs and request errors
 
         changed = False
         if new_state is not None:  # We got a valid state (could be playing or not, but device is active)
-            if self.latest_playback_state is None or \
-                    new_state.get("timestamp") != self.latest_playback_state.get("timestamp") or \
-                    new_state.get("item", {}).get("id") != self.latest_playback_state.get("item", {}).get("id") or \
-                    new_state.get("is_playing") != self.latest_playback_state.get("is_playing") or \
-                    new_state.get("shuffle_state") != self.latest_playback_state.get("shuffle_state") or \
-                    new_state.get("repeat_state") != self.latest_playback_state.get("repeat_state") or \
-                    new_state.get("device", {}).get("id") != self.latest_playback_state.get("device", {}).get("id") or \
-                    new_state.get("device", {}).get("volume_percent") != self.latest_playback_state.get("device",
-                                                                                                        {}).get(
-                "volume_percent"):
+            prev = self.latest_playback_state
+            new_item = new_state.get("item") or {}
+            prev_item = (prev.get("item") or {}) if prev else {}
+            new_device = new_state.get("device") or {}
+            prev_device = (prev.get("device") or {}) if prev else {}
+
+            if prev is None or \
+                    new_item.get("id") != prev_item.get("id") or \
+                    new_state.get("is_playing") != prev.get("is_playing") or \
+                    new_state.get("shuffle_state") != prev.get("shuffle_state") or \
+                    new_state.get("repeat_state") != prev.get("repeat_state") or \
+                    new_device.get("id") != prev_device.get("id") or \
+                    new_device.get("volume_percent") != prev_device.get("volume_percent"):
                 log.info("Spotify playback state changed.")
                 self.latest_playback_state = new_state
                 changed = True
@@ -524,8 +533,7 @@ class SpotifyController:
         # If both new_state and latest_playback_state are None, no change.
 
         if changed:
-            # Copy callbacks list in case it's modified during iteration by a callback
-            for callback in list(self.update_callbacks):
+            for callback in callbacks:
                 name = getattr(callback, '__name__', repr(callback))
                 try:
                     # Ensure UI updates happen on the main GTK thread
@@ -537,7 +545,10 @@ class SpotifyController:
         log.info(f"Spotify polling loop started. Interval: {self._update_interval}s.")
         while not self._stop_polling_event.is_set():
             start_time = time.monotonic()
-            self._perform_update_and_notify()
+            try:
+                self._perform_update_and_notify()
+            except Exception as e:
+                log.error(f"Unexpected error in Spotify polling loop: {e}")
             elapsed_time = time.monotonic() - start_time
 
             wait_time = self._update_interval - elapsed_time
@@ -574,21 +585,31 @@ class SpotifyController:
         if not callable(callback):
             log.error(f"Attempted to register non-callable object as callback: {name}")
             return
-        if callback not in self.update_callbacks:
-            self.update_callbacks.append(callback)
+        if callback not in self._live_callbacks():
+            ref = weakref.WeakMethod(callback) if inspect.ismethod(callback) else weakref.ref(callback)
+            self.update_callbacks.append(ref)
             log.info(f"Callback {name} registered.")
-            # Optionally, provide current state immediately to new callback via main thread
-            if self.latest_playback_state is not None:  # Or even if it's None, to signal current status
+            if self.latest_playback_state is not None:
                 GLib.idle_add(callback, self.latest_playback_state)
         else:
             log.info(f"Callback {name} already registered.")
 
     def unregister_update_callback(self, callback: Callable[[Optional[Dict[str, Any]]], None]):
         name = getattr(callback, '__name__', repr(callback))
-        try:
-            self.update_callbacks.remove(callback)
+        kept = []
+        removed = False
+        for ref in list(self.update_callbacks):
+            cb = ref() if isinstance(ref, weakref.ReferenceType) else ref
+            if cb is None:
+                continue
+            if cb == callback:
+                removed = True
+                continue
+            kept.append(ref)
+        self.update_callbacks = kept
+        if removed:
             log.info(f"Callback {name} unregistered.")
-        except ValueError:
+        else:
             log.warning(f"Callback {name} not found for unregistration.")
 
     def get_raw_playback_devices(self)-> Optional[Dict[str, Any]]:
@@ -648,8 +669,7 @@ class SpotifyController:
         try:
             response = self._make_api_request("PUT", PLAYER_BASE_ENDPOINT,
                                               json={"device_ids": [device.id]})
-            # Spotify usually returns 204 No Content for successful control actions
-            return response is not None and response.status_code == 204
+            return response is not None and 200 <= response.status_code < 300
         except requests.RequestException as e:
             log.error(f"Setting playback device failed: {e}")
             return False

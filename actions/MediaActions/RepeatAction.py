@@ -1,23 +1,10 @@
 # Import StreamController modules
 from src.backend.PluginManager.ActionBase import ActionBase
-from src.backend.DeckManagement.DeckController import DeckController
-from src.backend.PageManagement.Page import Page
-from src.backend.PluginManager.PluginBase import PluginBase
 
 # Import python modules
 import os
-from loguru import logger as log
-from GtkHelper.GenerativeUI.EntryRow import EntryRow # For regular text input
-from GtkHelper.GenerativeUI.PasswordEntryRow import PasswordEntryRow # For secrets
-
-# Import gtk modules - used for the config rows
-import gi
 
 from ...utils.SpotifyController import SpotifyController
-
-gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw
 
 class Repeat(ActionBase):
     def __init__(self, *args, **kwargs):
@@ -38,21 +25,16 @@ class Repeat(ActionBase):
 
     def on_key_down(self) -> None:
         repeat = self.get_controller.get_repeat_state()
-        idx = max((self.repeat_states.index(repeat)+1)%3,0)
+        idx = (self.repeat_states.index(repeat) + 1) % len(self.repeat_states) if repeat in self.repeat_states else 0
         next_state = self.repeat_states[idx]
-        next_state_icon = self.repeat_context_icon[idx]
-        self.get_controller.set_repeat_state(next_state)
-        self.set_media(media_path=next_state_icon, size=0.75)
+        if self.get_controller.set_repeat_state(next_state):
+            self.set_media(media_path=self.icon_paths[idx], size=0.75)
 
     def on_update(self, state=None):
         repeat_state = self.get_controller.get_repeat_state(state)
-        if repeat_state is None:
-            # default to no repeat
-            icon = self.icon_paths[0]
-            self.set_media(media_path=icon, size=0.75)
-        else:
-            icon = self.icon_paths[self.repeat_states.index(repeat_state)]
-            self.set_media(media_path=icon, size=0.75)
+        idx = self.repeat_states.index(repeat_state) if repeat_state in self.repeat_states else 0
+        self.set_media(media_path=self.icon_paths[idx], size=0.75)
+        return False
 
     def on_key_up(self) -> None:
         pass
