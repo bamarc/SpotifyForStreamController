@@ -1,42 +1,28 @@
 # Import StreamController modules
 from src.backend.PluginManager.ActionBase import ActionBase
-from src.backend.DeckManagement.DeckController import DeckController
-from src.backend.PageManagement.Page import Page
-from src.backend.PluginManager.PluginBase import PluginBase
 
 # Import python modules
 import os
-from loguru import logger as log
-from GtkHelper.GenerativeUI.EntryRow import EntryRow # For regular text input
-from GtkHelper.GenerativeUI.PasswordEntryRow import PasswordEntryRow # For secrets
-
-# Import gtk modules - used for the config rows
-import gi
 
 from ...utils.SpotifyController import SpotifyController
-
-gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw
 
 class VolumeUp(ActionBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.icon = os.path.join(self.plugin_base.PATH, "assets", "volume_up.png")
 
-
     @property
     def get_controller(self) -> SpotifyController:
         return self.plugin_base.get_controller
 
     def on_ready(self) -> None:
-        icon_path = self.icon
-        self.set_media(media_path=icon_path, size=0.75)
+        self.set_media(media_path=self.icon, size=0.75)
 
     def on_key_down(self) -> None:
         current_volume = self.get_controller.get_volume()
+        if current_volume is None:
+            return
         self.get_controller.set_volume(min(current_volume + 10, 100))
-
 
     def on_key_up(self) -> None:
         pass
@@ -46,41 +32,18 @@ class VolumeDown(ActionBase):
         super().__init__(*args, **kwargs)
         self.icon = os.path.join(self.plugin_base.PATH, "assets", "volume_down.png")
 
-
     @property
     def get_controller(self) -> SpotifyController:
         return self.plugin_base.get_controller
 
     def on_ready(self) -> None:
-        icon_path = self.icon
-        self.set_media(media_path=icon_path, size=0.75)
+        self.set_media(media_path=self.icon, size=0.75)
 
     def on_key_down(self) -> None:
         current_volume = self.get_controller.get_volume()
+        if current_volume is None:
+            return
         self.get_controller.set_volume(max(current_volume - 10, 0))
-
-
-    def on_key_up(self) -> None:
-        pass
-
-class VolumeMute(ActionBase):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.icon = os.path.join(self.plugin_base.PATH, "assets", "volume_down.png")
-
-
-    @property
-    def get_controller(self) -> SpotifyController:
-        return self.plugin_base.get_controller
-
-    def on_ready(self) -> None:
-        icon_path = self.icon
-        self.set_media(media_path=icon_path, size=0.75)
-
-    def on_key_down(self) -> None:
-        current_volume = self.get_controller.get_volume()
-        self.get_controller.set_volume(max(current_volume - 10, 0))
-
 
     def on_key_up(self) -> None:
         pass

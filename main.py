@@ -13,11 +13,11 @@ from .actions.MediaActions.RepeatAction import Repeat
 from .actions.MediaActions.DeviceActions import SelectDevice
 from .actions.MediaActions.VolumeActions import VolumeDown, VolumeUp
 
-from loguru import logger as log
+import threading
 import gi
-gi.require_version("Gtk" , "4.0")
+gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, Gdk
+from gi.repository import Adw, GLib
 
 class SpotifyForStreamController(PluginBase):
     def __init__(self):
@@ -29,7 +29,7 @@ class SpotifyForStreamController(PluginBase):
         self.client_secret_row = None
         self.client_id_row = None
         self.auth_controller = AuthController(self)
-        self.controller = SpotifyController(self, self.auth_controller, 1)
+        self.controller = SpotifyController(self, self.auth_controller, 2)
 
         ## Register actions
         holder = ActionHolder(
@@ -100,7 +100,7 @@ class SpotifyForStreamController(PluginBase):
         self.register(
             plugin_name = "Spotify For StreamController",
             github_repo = "https://github.com/bamarc/SpotifyForStreamController",
-            plugin_version = "0.2.0",
+            plugin_version = "0.3.0",
             app_version = "1.5.0-beta-10"
         )
 
@@ -168,31 +168,69 @@ class SpotifyForStreamController(PluginBase):
         return rows
 
     def handle_auth_code(self, code: str):
-        settings = self.get_settings()  # Get existing settings
+        settings = self.get_settings() or {}
         settings["client_authorization"] = code
-        del settings["client_refresh_token"]
-        print(f"{self.plugin_name}: Client Secret entry has been modified.")
+        settings.pop("client_refresh_token", None)
+        self.auth_controller.access_token_obj = None
         self.on_save(settings)
+        threading.Thread(
+            target=self.auth_controller.exchange_code_for_token,
+            args=(code,),
+            daemon=True,
+            name="SpotifyTokenExchangeThread",
+        ).start()
+        return False
 
     def on_login(self, _):
-        controller = self.get_auth_controller
-        controller.initiate_login_flow()
+        # Save unsaved Client ID / Secret edits so Login works even if Apply wasn't clicked.
+        settings = self.get_settings() or {}
+        changed = False
+        if self.client_id_row is not None:
+            client_id = self.client_id_row.get_text().strip()
+            if client_id != settings.get("client_id"):
+                settings["client_id"] = client_id
+                changed = True
+        if self.client_secret_row is not None:
+            client_secret = self.client_secret_row.get_text().strip()
+            if client_secret != settings.get("client_secret"):
+                settings["client_secret"] = client_secret
+                changed = True
+        if changed:
+            self.on_save(settings)
+
+        self.get_auth_controller.initiate_login_flow()
 
     def on_save(self, settings):
         self.set_settings(settings)
+        GLib.idle_add(
+            self._sync_auth_rows,
+            settings.get("client_authorization"),
+            settings.get("client_refresh_token"),
+        )
+
+    def _sync_auth_rows(self, authorization, refresh_token):
+        if self.client_authorization_row is not None:
+            auth_text = authorization or ""
+            if self.client_authorization_row.get_text() != auth_text:
+                self.client_authorization_row.set_text(auth_text)
+        if self.client_refresh_token_row is not None:
+            refresh_text = refresh_token or ""
+            if self.client_refresh_token_row.get_text() != refresh_text:
+                self.client_refresh_token_row.set_text(refresh_text)
+        return False
 
     def _on_client_id_entry_changed(self, entry_row):
         # Store client id
-        settings = self.get_settings()  # Get existing settings
-        client_id = entry_row.get_text()
+        settings = self.get_settings() or {}
+        client_id = entry_row.get_text().strip()
         settings["client_id"] = client_id
         print(f"{self.plugin_name}: Client ID entry changed to: {client_id}")
         self.on_save(settings)
 
     def _on_client_secret_entry_changed(self, entry_row):
         #  Store client secret
-        settings = self.get_settings()  # Get existing settings
-        client_secret = entry_row.get_text()
+        settings = self.get_settings() or {}
+        client_secret = entry_row.get_text().strip()
         settings["client_secret"] = client_secret
         print(f"{self.plugin_name}: Client Secret entry has been modified.")
         self.on_save(settings)
